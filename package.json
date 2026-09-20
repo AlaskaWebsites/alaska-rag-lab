@@ -1,0 +1,37 @@
+{
+  "name": "alaska-rag-lab",
+  "version": "1.0.0",
+  "description": "Laboratório prático de arquitetura RAG Bare Metal com NestJS, pgvector, Ollama e Zod",
+  "main": "dist/main.js",
+  "scripts": {
+    "build": "tsc",
+    "worker": "tsx src/scripts/run-worker.ts",
+    "ingest": "tsx src/scripts/ingest-file.ts",
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "keywords": [
+    "rag",
+    "pgvector",
+    "bullmq",
+    "ollama",
+    "nestjs",
+    "zod"
+  ],
+  "author": "Alaska Websites",
+  "license": "MIT",
+  "dependencies": {
+    "bullmq": "^5.12.0",
+    "dotenv": "^16.4.5",
+    "ioredis": "^5.4.1",
+    "pg": "^8.12.0",
+    "zod": "^3.23.8"
+  },
+  "devDependencies": {
+    "@types/node": "^20.14.10",
+    "@types/pg": "^8.11.6",
+    "tsx": "^4.16.2",
+    "typescript": "^5.5.4",
+    "vitest": "^2.0.5"
+  }
+}

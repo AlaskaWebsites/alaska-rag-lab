@@ -20,24 +20,46 @@ Validar e consolidar na prática os conceitos dos mapas mentais de Engenharia de
 
 ---
 
-## 🚀 Como subir a infraestrutura local
+## 🚀 Como Executar Localmente
 
-1. Crie o arquivo `.env`:
-   ```bash
-   cp .env.example .env
-   ```
+### 1. Pré-requisitos (Ollama)
+Certifique-se de ter o Ollama instalado e baixe o modelo de embeddings:
+```bash
+ollama pull nomic-embed-text
+ollama pull llama3
+```
 
-2. Suba os containers do PostgreSQL (com pgvector) e Redis:
-   ```bash
-   docker compose up -d
-   ```
+### 2. Subir a Infraestrutura (PostgreSQL + pgvector + Redis)
+```bash
+cp .env.example .env
+docker compose up -d
+docker compose ps
+```
 
-3. Verifique o status dos serviços:
-   ```bash
-   docker compose ps
-   ```
+### 3. Instalar Dependências
+```bash
+npm install
+```
 
-O script em `docker/init.sql` inicializa automaticamente a extensão `vector`, cria as tabelas `documents` e `document_chunks` (vetor de 768 dimensões alinhado ao `nomic-embed-text`) e aplica o índice **HNSW**.
+### 4. Executar Testes Unitários do Chunker
+```bash
+npm test
+```
+
+### 5. Executar a Esteira de Ingestão Assíncrona (Passo 1)
+Abra dois terminais na raiz do projeto:
+
+**Terminal 1 (Worker BullMQ)**:
+```bash
+npm run worker
+```
+
+**Terminal 2 (Disparo do Job de Ingestão)**:
+```bash
+npm run ingest
+```
+
+O worker lerá o arquivo `data/sample-knowledge.md`, fará o chunking semântico, chamará o Ollama local para gerar os embeddings (768 dimensões) e salvará tudo de forma transacional no `pgvector` com índice **HNSW**.
 
 ---
 
@@ -46,9 +68,9 @@ O script em `docker/init.sql` inicializa automaticamente a extensão `vector`, c
 ### Passo 1: Esteira de Ingestão de Conhecimento (Offline / Worker)
 - [x] Subir container Docker com PostgreSQL e extensão `pgvector`.
 - [x] Configurar tabela para armazenar chunks, embeddings e metadados contextuais (documento, página, autor).
-- [ ] Desenvolver script/worker com BullMQ para leitura de arquivos Markdown/docs.
-- [ ] Implementar chunking semântico equilibrado (~300 a 400 tokens por fragmento).
-- [ ] Gerar embeddings locais via Ollama (`nomic-embed-text`) e persistir com integridade transacional.
+- [x] Desenvolver script/worker com BullMQ para leitura de arquivos Markdown/docs.
+- [x] Implementar chunking semântico equilibrado (~300 a 400 tokens por fragmento).
+- [x] Gerar embeddings locais via Ollama (`nomic-embed-text`) e persistir com integridade transacional.
 
 ### Passo 2: Pipeline de Inferência em Tempo Real (Busca & Reranking)
 - [ ] Criar endpoint HTTP no NestJS para receber perguntas do usuário.
