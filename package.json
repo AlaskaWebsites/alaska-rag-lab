@@ -7,6 +7,7 @@
     "build": "tsc",
     "worker": "tsx src/scripts/run-worker.ts",
     "ingest": "tsx src/scripts/ingest-file.ts",
+    "search": "tsx src/scripts/test-search.ts",
     "test": "vitest run",
     "test:watch": "vitest"
   },
