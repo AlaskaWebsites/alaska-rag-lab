@@ -20,11 +20,32 @@ Validar e consolidar na prática os conceitos dos mapas mentais de Engenharia de
 
 ---
 
+## 🚀 Como subir a infraestrutura local
+
+1. Crie o arquivo `.env`:
+   ```bash
+   cp .env.example .env
+   ```
+
+2. Suba os containers do PostgreSQL (com pgvector) e Redis:
+   ```bash
+   docker compose up -d
+   ```
+
+3. Verifique o status dos serviços:
+   ```bash
+   docker compose ps
+   ```
+
+O script em `docker/init.sql` inicializa automaticamente a extensão `vector`, cria as tabelas `documents` e `document_chunks` (vetor de 768 dimensões alinhado ao `nomic-embed-text`) e aplica o índice **HNSW**.
+
+---
+
 ## 📋 Roteiro de Implementação
 
 ### Passo 1: Esteira de Ingestão de Conhecimento (Offline / Worker)
-- [ ] Subir container Docker com PostgreSQL e extensão `pgvector`.
-- [ ] Configurar tabela para armazenar chunks, embeddings e metadados contextuais (documento, página, autor).
+- [x] Subir container Docker com PostgreSQL e extensão `pgvector`.
+- [x] Configurar tabela para armazenar chunks, embeddings e metadados contextuais (documento, página, autor).
 - [ ] Desenvolver script/worker com BullMQ para leitura de arquivos Markdown/docs.
 - [ ] Implementar chunking semântico equilibrado (~300 a 400 tokens por fragmento).
 - [ ] Gerar embeddings locais via Ollama (`nomic-embed-text`) e persistir com integridade transacional.
