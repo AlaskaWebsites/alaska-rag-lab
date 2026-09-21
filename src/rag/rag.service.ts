@@ -15,6 +15,7 @@ export interface RetrievedChunk {
 export interface RagQueryOptions {
   topK?: number;
   minSimilarity?: number;
+  debug?: boolean;
 }
 
 @Injectable()
@@ -22,7 +23,7 @@ export class RagService {
   private readonly ollama = new OllamaService();
 
   /**
-   * Executa o pipeline completo de inferência RAG:
+   * Executa o pipeline completo de inferência RAG com telemetria biônica:
    * 1. Vetorização em tempo real (nomic-embed-text)
    * 2. Busca vetorial por similaridade no pgvector (distância de cosseno <=>)
    * 3. Filtro cirúrgico de evidências (top 3) mitigando Lost in the Middle
@@ -30,13 +31,23 @@ export class RagService {
    * 5. Validação estrita via schema Zod com Fail-Fast e flag INSUFFICIENT_DATA
    */
   async ask(question: string, options: RagQueryOptions = {}): Promise<RagResponse> {
+    const totalStart = performance.now();
     const topK = options.topK ?? 3;
     const minSimilarity = options.minSimilarity ?? 0.40;
+    const isDebug = options.debug ?? false;
+
+    console.log(`\n${'='.repeat(75)}`);
+    console.log(`🔬 [VISÃO BIÔNICA - PIPELINE RAG INICIADO]`);
+    console.log(`❓ Pergunta: "${question}"`);
 
     // 1. Vetorização em tempo real da pergunta
+    const startVec = performance.now();
     const queryEmbedding = await this.ollama.generateEmbedding(question);
+    const vectorizationMs = Math.round(performance.now() - startVec);
+    console.log(`⚡ [Etapa 1: Vetorização]: ${vectorizationMs}ms (Vetor de 768 dimensões gerado no Ollama)`);
 
     // 2. Busca Vetorial no pgvector
+    const startSearch = performance.now();
     const query = `
       SELECT 
         c.id,
@@ -55,6 +66,8 @@ export class RagService {
       JSON.stringify(queryEmbedding),
       topK,
     ]);
+    const vectorSearchMs = Math.round(performance.now() - startSearch);
+    console.log(`📊 [Etapa 2: pgvector HNSW]: ${vectorSearchMs}ms (Busca por distância de cosseno <=>)`);
 
     const retrievedChunks: RetrievedChunk[] = dbResult.rows.map((row) => ({
       id: row.id,
@@ -65,6 +78,12 @@ export class RagService {
       distance: parseFloat(row.distancia_cosseno),
     }));
 
+    retrievedChunks.forEach((c, i) => {
+      console.log(
+        `   └─ Candidato #${i + 1}: Chunk [${c.chunkIndex}] | Similaridade: ${(c.similarity * 100).toFixed(1)}% (Distância: ${c.distance})`
+      );
+    });
+
     // Filtra chunks que atingem a nota mínima de relevância
     const approvedChunks = retrievedChunks.filter(
       (c) => c.similarity >= minSimilarity
@@ -72,12 +91,29 @@ export class RagService {
 
     // 3. Verificação precoce de insuficiência (Fail-Fast pré-LLM)
     if (approvedChunks.length === 0) {
+      const totalMs = Math.round(performance.now() - totalStart);
+      console.log(`🛑 [Etapa 3: Fail-Fast Pré-LLM]: Nenhum chunk atingiu similaridade mínima (>= ${minSimilarity}). Abortando chamada da LLM.`);
+      console.log(`${'='.repeat(75)}\n`);
+
       return {
         status: 'INSUFFICIENT_DATA',
         answer:
           'Não foram encontradas informações ou evidências relevantes na base de conhecimento para responder a esta pergunta.',
         confidence: 'NONE',
         sources: [],
+        ...(isDebug && {
+          debug: {
+            latencies: {
+              vectorizationMs,
+              vectorSearchMs,
+              llmGenerationMs: 0,
+              validationMs: 0,
+              totalMs,
+            },
+            candidatesFound: 0,
+            promptTokensEstimated: 0,
+          },
+        }),
       };
     }
 
@@ -88,6 +124,11 @@ export class RagService {
           `[Fonte #${idx + 1} | Documento: "${c.documentTitle}" | Chunk: ${c.chunkIndex} | Relevância: ${(c.similarity * 100).toFixed(1)}%]\n${c.content.trim()}`
       )
       .join('\n\n---\n\n');
+
+    const promptTokensEstimated = Math.round(contextFormatted.length / 4);
+    console.log(
+      `🎯 [Etapa 3: Redução de Ruído]: ${approvedChunks.length} chunks aprovados (~${promptTokensEstimated} tokens de contexto injetados)`
+    );
 
     const systemPrompt = `Você é um assistente técnico de IA estritamente factual operando sobre uma base de conhecimento privada.
 Sua missão é responder à pergunta do usuário utilizando EXCLUSIVAMENTE as fontes fornecidas no contexto.
@@ -113,23 +154,34 @@ REGRAS RÍGIDAS DE GERAÇÃO:
     const userPrompt = `Contexto Disponível:\n${contextFormatted}\n\nPergunta do Usuário:\n${question}`;
 
     // 5. Chamada ao modelo LLM com formato JSON forçado
+    console.log(`🤖 [Etapa 4: Inferência LLM]: Disparando prompt cirúrgico para o Ollama (llama3)...`);
+    const startLlm = performance.now();
     const rawOutput = await this.ollama.generateChatCompletion([
       { role: 'system', content: systemPrompt },
       { role: 'user', content: userPrompt },
     ]);
+    const llmGenerationMs = Math.round(performance.now() - startLlm);
+    console.log(`   └─ Ollama respondeu em ${llmGenerationMs}ms (${(llmGenerationMs / 1000).toFixed(2)}s)`);
 
     // 6. Validação e Sanitização Fail-Fast com Zod
+    const startVal = performance.now();
+    let validatedResponse: RagResponse;
+
     try {
       const parsedJson = JSON.parse(rawOutput);
       const validated = RagResponseSchema.parse(parsedJson);
-      return validated;
+      const validationMs = Math.round(performance.now() - startVal);
+      console.log(`🛡️ [Etapa 5: Zod Validation]: ${validationMs}ms (Contrato 100% válido, status: ${validated.status})`);
+
+      validatedResponse = validated;
     } catch (validationError) {
+      const validationMs = Math.round(performance.now() - startVal);
       console.warn(
-        '[RAG Fail-Fast] LLM violou o schema estrito do Zod. Ativando fallback seguro.',
+        `⚠️ [Etapa 5: Zod Fail-Fast]: LLM gerou payload inválido (${validationMs}ms). Ativando fallback de segurança.`,
         validationError
       );
 
-      return {
+      validatedResponse = {
         status: 'INSUFFICIENT_DATA',
         answer:
           'A resposta gerada violou o contrato de validação estrito ou continha inconsistências.',
@@ -141,5 +193,25 @@ REGRAS RÍGIDAS DE GERAÇÃO:
         })),
       };
     }
+
+    const totalMs = Math.round(performance.now() - totalStart);
+    console.log(`⏱️ [TEMPO TOTAL DO PIPELINE]: ${totalMs}ms (${(totalMs / 1000).toFixed(2)}s)`);
+    console.log(`${'='.repeat(75)}\n`);
+
+    if (isDebug) {
+      validatedResponse.debug = {
+        latencies: {
+          vectorizationMs,
+          vectorSearchMs,
+          llmGenerationMs,
+          validationMs: Math.round(performance.now() - startVal),
+          totalMs,
+        },
+        candidatesFound: approvedChunks.length,
+        promptTokensEstimated,
+      };
+    }
+
+    return validatedResponse;
   }
 }

@@ -18,7 +18,6 @@ export class RagController {
   private readonly ragService: RagService;
 
   constructor(@Optional() @Inject(RagService) ragService?: RagService) {
-    // Garante inicialização mesmo quando executado sob runners rápidos como tsx/esbuild
     this.ragService = ragService ?? new RagService();
   }
 
@@ -26,6 +25,9 @@ export class RagController {
   @HttpCode(HttpStatus.OK)
   @UsePipes(new ZodValidationPipe(AskQuestionDtoSchema))
   async ask(@Body() dto: AskQuestionDto): Promise<RagResponse> {
-    return this.ragService.ask(dto.question, { topK: dto.topK });
+    return this.ragService.ask(dto.question, {
+      topK: dto.topK,
+      debug: dto.debug,
+    });
   }
 }

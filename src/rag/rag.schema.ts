@@ -22,6 +22,19 @@ export const RagResponseSchema = z.object({
       })
     )
     .describe('Lista das fontes aprovadas e utilizadas para responder.'),
+  debug: z
+    .object({
+      latencies: z.object({
+        vectorizationMs: z.number(),
+        vectorSearchMs: z.number(),
+        llmGenerationMs: z.number(),
+        validationMs: z.number(),
+        totalMs: z.number(),
+      }),
+      candidatesFound: z.number(),
+      promptTokensEstimated: z.number(),
+    })
+    .optional(),
 });
 
 export type RagResponse = z.infer<typeof RagResponseSchema>;
