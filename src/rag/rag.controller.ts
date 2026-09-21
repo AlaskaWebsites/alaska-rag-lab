@@ -1,4 +1,13 @@
-import { Controller, Post, Body, UsePipes, HttpCode, HttpStatus } from '@nestjs/common';
+import {
+  Controller,
+  Post,
+  Body,
+  UsePipes,
+  HttpCode,
+  HttpStatus,
+  Inject,
+  Optional,
+} from '@nestjs/common';
 import { RagService } from './rag.service.js';
 import { AskQuestionDtoSchema, type AskQuestionDto } from './rag.dto.js';
 import { ZodValidationPipe } from '../common/pipes/zod-validation.pipe.js';
@@ -6,7 +15,12 @@ import type { RagResponse } from './rag.schema.js';
 
 @Controller('rag')
 export class RagController {
-  constructor(private readonly ragService: RagService) {}
+  private readonly ragService: RagService;
+
+  constructor(@Optional() @Inject(RagService) ragService?: RagService) {
+    // Garante inicialização mesmo quando executado sob runners rápidos como tsx/esbuild
+    this.ragService = ragService ?? new RagService();
+  }
 
   @Post('ask')
   @HttpCode(HttpStatus.OK)
