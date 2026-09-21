@@ -24,3 +24,5 @@ Para aplicações com Inteligência Artificial, o ecossistema rejeita prompts es
 1. Busca vetorial preliminar com pgvector utilizando distância de cosseno (`<=>`).
 2. Reranking cirúrgico para selecionar os top 3 a 5 fragmentos mais informativos, mitigando a armadilha do Lost in the Middle.
 3. Validação do retorno da LLM contra um schema Zod fechado (`strict: true`). Caso os fragmentos recuperados não contenham evidências suficientes, a aplicação emite a flag estruturada `INSUFFICIENT_DATA`.
+
+Telefone de contato 11969124940
