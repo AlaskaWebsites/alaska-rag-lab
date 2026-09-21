@@ -15,7 +15,7 @@ Validar e consolidar na prática os conceitos dos mapas mentais de Engenharia de
 - **Runtime & Framework**: Node.js, TypeScript e NestJS
 - **Banco Vetorial**: PostgreSQL com extensão `pgvector`
 - **Fila & Processamento Assíncrono**: BullMQ + Redis
-- **LLM & Embeddings Locais**: Ollama (`nomic-embed-text` para embeddings e `llama3` / `phi3` para inferência)
+- **LLM & Embeddings Locais**: Ollama (`nomic-embed-text` para embeddings e `llama3` para inferência)
 - **Contratos & Validação**: Zod (Structured Outputs e Fail-Fast)
 
 ---
@@ -23,7 +23,7 @@ Validar e consolidar na prática os conceitos dos mapas mentais de Engenharia de
 ## 🚀 Como Executar Localmente
 
 ### 1. Pré-requisitos (Ollama)
-Certifique-se de ter o Ollama instalado e baixe o modelo de embeddings:
+Certifique-se de ter o Ollama instalado com os modelos:
 ```bash
 ollama pull nomic-embed-text
 ollama pull llama3
@@ -33,33 +33,41 @@ ollama pull llama3
 ```bash
 cp .env.example .env
 docker compose up -d
-docker compose ps
 ```
 
-### 3. Instalar Dependências
+### 3. Instalar Dependências e Testar
 ```bash
 npm install
-```
-
-### 4. Executar Testes Unitários do Chunker
-```bash
 npm test
 ```
 
-### 5. Executar a Esteira de Ingestão Assíncrona (Passo 1)
-Abra dois terminais na raiz do projeto:
-
-**Terminal 1 (Worker BullMQ)**:
+### 4. Ingestão Assíncrona de Documentos (Passo 1)
+Em dois terminais separados:
 ```bash
+# Terminal 1: Inicia o worker BullMQ
 npm run worker
-```
 
-**Terminal 2 (Disparo do Job de Ingestão)**:
-```bash
+# Terminal 2: Enfileira o documento técnico
 npm run ingest
 ```
 
-O worker lerá o arquivo `data/sample-knowledge.md`, fará o chunking semântico, chamará o Ollama local para gerar os embeddings (768 dimensões) e salvará tudo de forma transacional no `pgvector` com índice **HNSW**.
+### 5. Busca por Similaridade Vetorial no pgvector (Passo 2)
+```bash
+npm run search -- "Como são tratados os preços e valores monetários no sistema?"
+```
+
+### 6. Pipeline RAG Completo com Geração Controlada e Zod Fail-Fast (Passo 3)
+Faça perguntas para o pipeline completo:
+```bash
+# Pergunta com evidências no documento:
+npm run ask -- "Como são tratados os preços e valores monetários no sistema?"
+
+# Pergunta sobre produtos:
+npm run ask -- "Quais são os módulos para restaurantes e serviços?"
+
+# Pergunta sem evidências (demonstra a flag INSUFFICIENT_DATA):
+npm run ask -- "Qual a receita secreta da pizza de calabresa?"
+```
 
 ---
 
@@ -73,21 +81,20 @@ O worker lerá o arquivo `data/sample-knowledge.md`, fará o chunking semântico
 - [x] Gerar embeddings locais via Ollama (`nomic-embed-text`) e persistir com integridade transacional.
 
 ### Passo 2: Pipeline de Inferência em Tempo Real (Busca & Reranking)
-- [ ] Criar endpoint HTTP no NestJS para receber perguntas do usuário.
-- [ ] Vetorizar a consulta recebida em tempo real utilizando o mesmo modelo de embeddings da ingestão.
-- [ ] Executar busca vetorial por distância de cosseno no `pgvector` recuperando uma lista ampla de candidatos preliminares (top 50 a 100).
-- [ ] Aplicar filtro/reranking cirúrgico para selecionar apenas o top 3 a 5 chunks mais relevantes, eliminando ruído e o efeito *Lost in the Middle*.
+- [x] Vetorizar a consulta recebida em tempo real utilizando o mesmo modelo de embeddings da ingestão (`nomic-embed-text`).
+- [x] Executar busca vetorial por distância de cosseno (`<=>`) no `pgvector` com índice HNSW.
+- [x] Aplicar filtro cirúrgico de contexto (top 3 chunks mais relevantes) mitigando o efeito *Lost in the Middle*.
 
 ### Passo 3: Geração Controlada & Validação Fail-Fast
-- [ ] Montar prompt cirúrgico injetando apenas as evidências aprovadas no top 3-5.
-- [ ] Realizar chamada à LLM local via Ollama aplicando restrição gramatical/estruturada (`strict: true`).
-- [ ] Definir schema Zod estrito para o payload de resposta.
-- [ ] Implementar barreira *fail-fast*: se a resposta for inválida, incompleta ou fora do schema, retornar a flag controlada `INSUFFICIENT_DATA`, impedindo alucinações na ponta.
+- [x] Montar prompt cirúrgico injetando apenas as evidências aprovadas no contexto.
+- [x] Realizar chamada à LLM local via Ollama forçando saída estruturada em JSON (`format: 'json'`).
+- [x] Definir schema Zod estrito (`RagResponseSchema`) para validar a saída em tempo de execução.
+- [x] Implementar barreira *fail-fast*: se a resposta for incompleta, inválida ou faltar contexto, retornar deterministicamente a flag `INSUFFICIENT_DATA`, bloqueando alucinações.
 
 ---
 
-## 📊 Métricas e Gargalos a Monitorar
+## 📊 Métricas e Gargalos Monitorados
 
-- Latência da busca vetorial sob concorrência no `pgvector`.
-- Sobrecarga e tempo de resposta da etapa de reranking.
+- Latência da busca vetorial sob concorrência no `pgvector` (geralmente < 25ms com HNSW).
+- Latência de geração do LLM local (Ollama).
 - Taxa de aderência ao schema Zod vs. acionamento da flag `INSUFFICIENT_DATA`.

@@ -8,6 +8,7 @@
     "worker": "tsx src/scripts/run-worker.ts",
     "ingest": "tsx src/scripts/ingest-file.ts",
     "search": "tsx src/scripts/test-search.ts",
+    "ask": "tsx src/scripts/ask.ts",
     "test": "vitest run",
     "test:watch": "vitest"
   },
