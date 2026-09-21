@@ -51,22 +51,55 @@ npm run worker
 npm run ingest
 ```
 
-### 5. Busca por Similaridade Vetorial no pgvector (Passo 2)
+### 5. Executar o Servidor HTTP NestJS
+Inicie o servidor em modo de desenvolvimento (com hot reload via `tsx watch`):
 ```bash
-npm run search -- "Como são tratados os preços e valores monetários no sistema?"
+npm run start:dev
+```
+A API estará disponível em: `http://localhost:3000/rag/ask`.
+
+---
+
+## 📡 Como Chamar o Endpoint HTTP
+
+### Exemplo 1: Pergunta respondível com fontes (Sucesso)
+```bash
+curl -X POST http://localhost:3000/rag/ask \
+  -H "Content-Type: application/json" \
+  -d '{"question": "Como são tratados os preços e valores monetários no sistema?"}'
 ```
 
-### 6. Pipeline RAG Completo com Geração Controlada e Zod Fail-Fast (Passo 3)
-Faça perguntas para o pipeline completo:
+**Resposta esperada (HTTP 200)**:
+```json
+{
+  "status": "SUCCESS",
+  "answer": "Os preços e valores monetários são obrigatoriamente armazenados e calculados em centavos inteiros (Integer Money VO), evitando qualquer anomalia de precisão de ponto flutuante.",
+  "confidence": "HIGH",
+  "sources": [
+    {
+      "documentTitle": "Arquitetura e Padrões Alaska Local",
+      "chunkIndex": 1,
+      "relevanceScore": 0.5933
+    }
+  ]
+}
+```
+
+### Exemplo 2: Pergunta fora do escopo (Fail-Fast / Insufficient Data)
 ```bash
-# Pergunta com evidências no documento:
-npm run ask -- "Como são tratados os preços e valores monetários no sistema?"
+curl -X POST http://localhost:3000/rag/ask \
+  -H "Content-Type: application/json" \
+  -d '{"question": "Qual a receita da torta de maçã?"}'
+```
 
-# Pergunta sobre produtos:
-npm run ask -- "Quais são os módulos para restaurantes e serviços?"
-
-# Pergunta sem evidências (demonstra a flag INSUFFICIENT_DATA):
-npm run ask -- "Qual a receita secreta da pizza de calabresa?"
+**Resposta esperada (HTTP 200)**:
+```json
+{
+  "status": "INSUFFICIENT_DATA",
+  "answer": "A receita da torta de maçã não está presente no contexto fornecido.",
+  "confidence": "NONE",
+  "sources": [...]
+}
 ```
 
 ---
@@ -81,6 +114,7 @@ npm run ask -- "Qual a receita secreta da pizza de calabresa?"
 - [x] Gerar embeddings locais via Ollama (`nomic-embed-text`) e persistir com integridade transacional.
 
 ### Passo 2: Pipeline de Inferência em Tempo Real (Busca & Reranking)
+- [x] Criar endpoint HTTP no NestJS para receber perguntas do usuário (`POST /rag/ask`).
 - [x] Vetorizar a consulta recebida em tempo real utilizando o mesmo modelo de embeddings da ingestão (`nomic-embed-text`).
 - [x] Executar busca vetorial por distância de cosseno (`<=>`) no `pgvector` com índice HNSW.
 - [x] Aplicar filtro cirúrgico de contexto (top 3 chunks mais relevantes) mitigando o efeito *Lost in the Middle*.
@@ -90,11 +124,3 @@ npm run ask -- "Qual a receita secreta da pizza de calabresa?"
 - [x] Realizar chamada à LLM local via Ollama forçando saída estruturada em JSON (`format: 'json'`).
 - [x] Definir schema Zod estrito (`RagResponseSchema`) para validar a saída em tempo de execução.
 - [x] Implementar barreira *fail-fast*: se a resposta for incompleta, inválida ou faltar contexto, retornar deterministicamente a flag `INSUFFICIENT_DATA`, bloqueando alucinações.
-
----
-
-## 📊 Métricas e Gargalos Monitorados
-
-- Latência da busca vetorial sob concorrência no `pgvector` (geralmente < 25ms com HNSW).
-- Latência de geração do LLM local (Ollama).
-- Taxa de aderência ao schema Zod vs. acionamento da flag `INSUFFICIENT_DATA`.

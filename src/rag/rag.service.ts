@@ -1,3 +1,4 @@
+import { Injectable } from '@nestjs/common';
 import { pool } from '../database/db.js';
 import { OllamaService } from '../ollama/ollama.service.js';
 import { RagResponseSchema, type RagResponse } from './rag.schema.js';
@@ -16,14 +17,15 @@ export interface RagQueryOptions {
   minSimilarity?: number;
 }
 
+@Injectable()
 export class RagService {
   private readonly ollama = new OllamaService();
 
   /**
-   * Executa o pipeline completo:
-   * 1. Vetorização da pergunta (nomic-embed-text)
-   * 2. Busca por similaridade no pgvector (distância de cosseno <=>)
-   * 3. Filtro cirúrgico de contexto (top 3) para mitigar Lost in the Middle
+   * Executa o pipeline completo de inferência RAG:
+   * 1. Vetorização em tempo real (nomic-embed-text)
+   * 2. Busca vetorial por similaridade no pgvector (distância de cosseno <=>)
+   * 3. Filtro cirúrgico de evidências (top 3) mitigando Lost in the Middle
    * 4. Geração controlada no Ollama com Structured Output (JSON)
    * 5. Validação estrita via schema Zod com Fail-Fast e flag INSUFFICIENT_DATA
    */
@@ -122,8 +124,6 @@ REGRAS RÍGIDAS DE GERAÇÃO:
       const validated = RagResponseSchema.parse(parsedJson);
       return validated;
     } catch (validationError) {
-      // Se a LLM retornar JSON quebrado ou campos fora do contrato,
-      // rejeitamos a resposta (fail-fast) em vez de vazar alucinações para a UI
       console.warn(
         '[RAG Fail-Fast] LLM violou o schema estrito do Zod. Ativando fallback seguro.',
         validationError
