@@ -21,44 +21,48 @@ Validar e consolidar na prática os conceitos dos mapas mentais de Engenharia de
 
 ---
 
-## 📁 Estrutura do Projeto
+## 📁 Estrutura Modular do Projeto (Package by Feature)
 
 ```text
 alaska-rag-lab/
 ├── data/
-│   └── sample-knowledge.md       # Documento Markdown corporativo para testes
+│   └── sample-knowledge.md               # Documento Markdown corporativo para testes
 ├── docker/
-│   └── init.sql                  # Inicialização da extensão vector, tabelas e índice HNSW
+│   └── init.sql                          # Extensão vector, tabelas e índice HNSW
 ├── src/
-│   ├── common/
-│   │   └── pipes/
-│   │       └── zod-validation.pipe.ts  # Pipe NestJS para validação fail-fast de DTOs
-│   ├── config/
-│   │   └── env.ts                # Variáveis de ambiente validadas com Zod
-│   ├── database/
-│   │   └── db.ts                 # Pool de conexões PostgreSQL
-│   ├── ingestion/
-│   │   ├── chunker.ts            # Fatiamento semântico (~350 tokens com overlap de 50)
-│   │   ├── chunker.spec.ts       # Testes unitários do chunker (Vitest)
-│   │   ├── ingestion.service.ts  # Produtor da fila BullMQ
-│   │   └── ingestion.worker.ts   # Worker com persistência transacional no pgvector
-│   ├── ollama/
-│   │   └── ollama.service.ts     # Client REST para embeddings e chat (JSON mode)
-│   ├── rag/
-│   │   ├── rag.controller.ts     # Controller HTTP (POST /rag/ask)
-│   │   ├── rag.dto.ts            # DTO com Zod e flag de debug
-│   │   ├── rag.module.ts         # Módulo NestJS
-│   │   ├── rag.schema.ts         # Contrato estrito de saída da LLM (RagResponseSchema)
-│   │   ├── rag.schema.spec.ts    # Testes unitários dos contratos (Vitest)
-│   │   └── rag.service.ts        # Orquestrador RAG com telemetria biônica
-│   ├── scripts/
-│   │   ├── ask.ts                # Runner CLI para perguntas
-│   │   ├── ingest-file.ts        # Runner CLI para enfileirar documentos
-│   │   ├── run-worker.ts         # Runner CLI para o worker BullMQ
-│   │   └── test-search.ts        # Runner CLI para teste de busca por cosseno (<=>)
-│   ├── app.module.ts             # Módulo raiz NestJS
-│   └── main.ts                   # Bootstrap HTTP NestJS
-├── docker-compose.yml            # Orquestração do Postgres (pgvector) e Redis
+│   ├── core/                             # Fundação transversal da aplicação
+│   │   ├── common/
+│   │   │   └── pipes/
+│   │   │       └── zod-validation.pipe.ts  # Pipe NestJS para validação fail-fast
+│   │   ├── config/
+│   │   │   └── env.ts                    # Variáveis de ambiente validadas com Zod
+│   │   └── database/
+│   │       └── db.ts                     # Pool de conexões PostgreSQL
+│   ├── modules/                          # Módulos e domínios de negócio
+│   │   ├── ai-engine/                    # Integração com provedores de IA
+│   │   │   ├── ollama.service.ts         # Client REST para embeddings e chat (JSON mode)
+│   │   │   └── ai-engine.module.ts
+│   │   ├── ingestion/                    # Esteira de ingestão assíncrona (Escrita)
+│   │   │   ├── chunker.ts                # Fatiamento semântico com overlap
+│   │   │   ├── chunker.spec.ts           # Testes unitários do chunker (Vitest)
+│   │   │   ├── ingestion.service.ts      # Produtor da fila BullMQ
+│   │   │   ├── ingestion.worker.ts       # Worker transacional com pgvector
+│   │   │   └── ingestion.module.ts
+│   │   └── rag/                          # Motor RAG de inferência e consulta (Leitura)
+│   │       ├── rag.controller.ts         # Endpoint HTTP (POST /rag/ask)
+│   │       ├── rag.dto.ts                # DTO com Zod e flag de debug
+│   │       ├── rag.schema.ts             # Contrato de saída da LLM (RagResponseSchema)
+│   │       ├── rag.schema.spec.ts        # Testes unitários do contrato (Vitest)
+│   │       ├── rag.service.ts            # Orquestrador RAG com telemetria biônica
+│   │       └── rag.module.ts
+│   ├── scripts/                          # Ferramentas CLI auxiliares
+│   │   ├── ask.ts                        # Runner CLI para perguntas
+│   │   ├── ingest-file.ts                # Runner CLI para enfileirar documentos
+│   │   ├── run-worker.ts                 # Runner CLI para o worker BullMQ
+│   │   └── test-search.ts                # Runner CLI para teste de busca por cosseno (<=>)
+│   ├── app.module.ts                     # Módulo raiz NestJS
+│   └── main.ts                           # Bootstrap HTTP NestJS
+├── docker-compose.yml                    # Orquestração do Postgres (pgvector) e Redis
 ├── package.json
 └── tsconfig.json
 ```
@@ -118,48 +122,11 @@ curl -X POST http://localhost:3000/rag/ask \
   }'
 ```
 
-**Resposta esperada (HTTP 200)**:
-```json
-{
-  "status": "SUCCESS",
-  "answer": "Os preços e valores monetários são obrigatoriamente armazenados e calculados em centavos inteiros (Integer Money VO), evitando qualquer anomalia de precisão de ponto flutuante.",
-  "confidence": "HIGH",
-  "sources": [
-    {
-      "documentTitle": "Arquitetura e Padrões Alaska Local",
-      "chunkIndex": 1,
-      "relevanceScore": 59.33
-    }
-  ],
-  "debug": {
-    "latencies": {
-      "vectorizationMs": 145,
-      "vectorSearchMs": 18,
-      "llmGenerationMs": 7650,
-      "validationMs": 2,
-      "totalMs": 7815
-    },
-    "candidatesFound": 3,
-    "promptTokensEstimated": 791
-  }
-}
-```
-
 ### Exemplo 2: Pergunta fora do escopo (Fail-Fast / Insufficient Data)
 ```bash
 curl -X POST http://localhost:3000/rag/ask \
   -H "Content-Type: application/json" \
   -d '{"question": "Qual a receita secreta da torta de maçã?"}'
-```
-
-**Resposta esperada (HTTP 200)**:
-```json
-{
-  "status": "INSUFFICIENT_DATA",
-  "answer": "A receita secreta da torta de maçã não está presente no contexto fornecido.",
-  "confidence": "NONE",
-  "sources": []
-}
 ```
 
 ---
