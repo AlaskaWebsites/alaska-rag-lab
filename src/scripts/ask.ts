@@ -1,5 +1,5 @@
-import { RagService } from '../rag/rag.service.js';
-import { pool } from '../database/db.js';
+import { RagService } from '../modules/rag/rag.service.js';
+import { pool } from '../core/database/db.js';
 
 async function main() {
   const question =

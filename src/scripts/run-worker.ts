@@ -1,4 +1,4 @@
-import { startIngestionWorker } from '../ingestion/ingestion.worker.js';
+import { startIngestionWorker } from '../modules/ingestion/ingestion.worker.js';
 
 console.log('🚀 Iniciando Worker BullMQ de Ingestão de Conhecimento...');
 const worker = startIngestionWorker();
