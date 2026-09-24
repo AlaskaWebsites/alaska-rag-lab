@@ -1,6 +1,6 @@
 import { env } from '../core/config/env.js';
 import { pool } from '../core/database/db.js';
-import { OllamaService } from '../modules/ai-engine/ollama.service.js';
+import { OllamaService } from '../modules/ai-engine/providers/ollama.service.js';
 
 async function search(queryText: string) {
   const ollama = new OllamaService();

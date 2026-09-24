@@ -1,5 +1,5 @@
 import path from 'node:path';
-import { enqueueDocument } from '../modules/ingestion/ingestion.service.js';
+import { enqueueDocument } from '../modules/ingestion/jobs/ingestion.service.js';
 
 async function main() {
   const targetFile = process.argv[2] ?? 'data/sample-knowledge.md';

@@ -1,6 +1,6 @@
 import { Module } from '@nestjs/common';
-import { RagController } from './rag.controller.js';
-import { RagService } from './rag.service.js';
+import { RagController } from './controllers/rag.controller.js';
+import { RagService } from './services/rag.service.js';
 import { AiEngineModule } from '../ai-engine/ai-engine.module.js';
 
 @Module({
