@@ -21,7 +21,7 @@ Validar e consolidar na prática os conceitos dos mapas mentais de Engenharia de
 
 ---
 
-## 📁 Estrutura Modular do Projeto (Package by Feature)
+## 📁 Estrutura Modular Refinada (Package by Feature / Clean Arch)
 
 ```text
 alaska-rag-lab/
@@ -30,30 +30,37 @@ alaska-rag-lab/
 ├── docker/
 │   └── init.sql                          # Extensão vector, tabelas e índice HNSW
 ├── src/
-│   ├── core/                             # Fundação transversal da aplicação
+│   ├── core/                             # Camada transversal (Kernel do sistema)
 │   │   ├── common/
 │   │   │   └── pipes/
-│   │   │       └── zod-validation.pipe.ts  # Pipe NestJS para validação fail-fast
+│   │   │       └── zod-validation.pipe.ts  # Pipe de validação fail-fast para DTOs
 │   │   ├── config/
 │   │   │   └── env.ts                    # Variáveis de ambiente validadas com Zod
 │   │   └── database/
 │   │       └── db.ts                     # Pool de conexões PostgreSQL
-│   ├── modules/                          # Módulos e domínios de negócio
-│   │   ├── ai-engine/                    # Integração com provedores de IA
-│   │   │   ├── ollama.service.ts         # Client REST para embeddings e chat (JSON mode)
+│   ├── modules/                          # Domínios e funcionalidades de negócio
+│   │   ├── ai-engine/                    # 1. Provedor agnóstico de IA
+│   │   │   ├── providers/
+│   │   │   │   └── ollama.service.ts     # Client HTTP REST para o Ollama
 │   │   │   └── ai-engine.module.ts
-│   │   ├── ingestion/                    # Esteira de ingestão assíncrona (Escrita)
-│   │   │   ├── chunker.ts                # Fatiamento semântico com overlap
-│   │   │   ├── chunker.spec.ts           # Testes unitários do chunker (Vitest)
-│   │   │   ├── ingestion.service.ts      # Produtor da fila BullMQ
-│   │   │   ├── ingestion.worker.ts       # Worker transacional com pgvector
+│   │   ├── ingestion/                    # 2. Esteira de ingestão assíncrona (Escrita)
+│   │   │   ├── domain/                   # Regras puras de fatiamento
+│   │   │   │   ├── chunker.ts
+│   │   │   │   └── chunker.spec.ts
+│   │   │   ├── jobs/                     # Fila e worker BullMQ
+│   │   │   │   ├── ingestion.service.ts  # Produtor de jobs
+│   │   │   │   └── ingestion.worker.ts   # Operário transacional com pgvector
 │   │   │   └── ingestion.module.ts
-│   │   └── rag/                          # Motor RAG de inferência e consulta (Leitura)
-│   │       ├── rag.controller.ts         # Endpoint HTTP (POST /rag/ask)
-│   │       ├── rag.dto.ts                # DTO com Zod e flag de debug
-│   │       ├── rag.schema.ts             # Contrato de saída da LLM (RagResponseSchema)
-│   │       ├── rag.schema.spec.ts        # Testes unitários do contrato (Vitest)
-│   │       ├── rag.service.ts            # Orquestrador RAG com telemetria biônica
+│   │   └── rag/                          # 3. Motor RAG de inferência e consulta (Leitura)
+│   │       ├── controllers/
+│   │       │   └── rag.controller.ts     # Entrada HTTP (POST /rag/ask)
+│   │       ├── dtos/
+│   │       │   └── rag.dto.ts            # Contrato de entrada da request
+│   │       ├── schemas/
+│   │       │   ├── rag.schema.ts         # Contrato de saída da LLM (Zod)
+│   │       │   └── rag.schema.spec.ts    # Testes unitários do contrato
+│   │       ├── services/
+│   │       │   └── rag.service.ts        # Orquestrador RAG com telemetria biônica
 │   │       └── rag.module.ts
 │   ├── scripts/                          # Ferramentas CLI auxiliares
 │   │   ├── ask.ts                        # Runner CLI para perguntas
