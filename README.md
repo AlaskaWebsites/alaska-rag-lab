@@ -54,6 +54,9 @@ alaska-rag-lab/
 │   │   │   │   └── ingestion.worker.ts   # Operário transacional com pgvector
 │   │   │   └── ingestion.module.ts
 │   │   └── rag/                          # 3. Motor RAG de inferência e consulta (Leitura)
+│   │       ├── domain/                   # Regras puras de fusão e ranking
+│   │       │   ├── rrf.ts                # Algoritmo Reciprocal Rank Fusion (RRF)
+│   │       │   └── rrf.spec.ts           # Testes unitários do RRF (Vitest)
 │   │       ├── controllers/
 │   │       │   └── rag.controller.ts     # Entrada HTTP (POST /rag/ask)
 │   │       ├── dtos/
@@ -62,13 +65,13 @@ alaska-rag-lab/
 │   │       │   ├── rag.schema.ts         # Contrato de saída da LLM (Zod)
 │   │       │   └── rag.schema.spec.ts    # Testes unitários do contrato
 │   │       ├── services/
-│   │       │   └── rag.service.ts        # Orquestrador RAG com telemetria biônica
+│   │       │   └── rag.service.ts        # Orquestrador RAG com Busca Híbrida + RRF
 │   │       └── rag.module.ts
 │   ├── scripts/                          # Ferramentas CLI auxiliares
 │   │   ├── ask.ts                        # Runner CLI para perguntas
 │   │   ├── ingest-file.ts                # Runner CLI para enfileirar documentos
 │   │   ├── run-worker.ts                 # Runner CLI para o worker BullMQ
-│   │   └── test-search.ts                # Runner CLI para teste de busca híbrida (Dense + Sparse)
+│   │   └── test-search.ts                # Runner CLI para teste de busca híbrida com RRF
 │   ├── app.module.ts                     # Módulo raiz NestJS
 │   └── main.ts                           # Bootstrap HTTP NestJS
 ├── docker-compose.yml                    # Orquestração do Postgres (pgvector) e Redis
@@ -93,7 +96,7 @@ docker compose up -d
 docker compose ps
 ```
 
-### 3. Aplicar Migration do Full-Text Search (Marco 1)
+### 3. Aplicar Migration do Full-Text Search (FTS)
 ```bash
 docker compose exec postgres psql -U postgres -d alaska_rag_db -c "
   ALTER TABLE document_chunks 
@@ -103,7 +106,7 @@ docker compose exec postgres psql -U postgres -d alaska_rag_db -c "
 "
 ```
 
-### 4. Instalar Dependências e Executar Testes
+### 4. Instalar Dependências e Executar Testes (Vitest)
 ```bash
 npm install
 npm test
@@ -118,16 +121,20 @@ npm run worker
 npm run ingest
 ```
 
-### 6. Testar Busca Híbrida no PostgreSQL (Passo 4 - Marco 1)
+### 6. Testar Busca Híbrida com RRF (Passo 4 - Marco 2)
 ```bash
-# Teste com termo exato (telefone/sigla):
+# Teste com pergunta de telefone (FTS + Vetor):
 npm run search -- "Tem algum telefone pra contato?"
 
-# Teste com pergunta conceitual:
-npm run search -- "Como são tratados os preços e valores monetários no sistema?"
+# Teste com número exato:
+npm run search -- "11969124940"
+
+# Teste com ferramentas técnicas:
+npm run search -- "BullMQ e Redis"
 ```
 
 ### 7. Executar o Servidor HTTP NestJS
+Inicie o servidor com hot reload:
 ```bash
 npm run start:dev
 ```
@@ -162,12 +169,14 @@ A API estará disponível em: `http://localhost:3000/rag/ask`.
   - [x] Coluna gerada `tsv tsvector` com dicionário em português na tabela `document_chunks`.
   - [x] Índice GIN (`idx_document_chunks_tsv`) para busca de texto completo em sub-milissegundos.
   - [x] Script `test-search.ts` atualizado para comparar busca vetorial (HNSW) vs. léxica (GIN) lado a lado.
-- [ ] **Marco 2: Algoritmo de Fusão RRF (Reciprocal Rank Fusion)**:
-  - [ ] Implementar função pura de RRF combinando os scores vetorial e léxico.
-  - [ ] Integrar RRF no `rag.service.ts` para ranking único consolidado.
+- [x] **Marco 2: Algoritmo de Fusão RRF (Reciprocal Rank Fusion)**:
+  - [x] Implementar função pura `reciprocalRankFusion` em `src/modules/rag/domain/rrf.ts`.
+  - [x] Criar testes unitários com Vitest (`rrf.spec.ts`).
+  - [x] Integrar Busca Híbrida Paralela + Fusão RRF no `rag.service.ts` e no endpoint HTTP.
+  - [x] Exibir ranking consolidado RRF no CLI `test-search.ts`.
 - [ ] **Marco 3: Cache Semântico no Redis**:
   - [ ] Armazenar pares de perguntas e respostas no Redis com similaridade de embedding >= 0.95.
   - [ ] Retornar respostas instantâneas (<10ms) em caso de Cache Hit.
 - [ ] **Marco 4: Observabilidade Expandida & RAG Evals**:
   - [ ] Métricas detalhadas de Cache Hit/Miss e scores RRF na telemetria.
-  - [ ] Testes automatizados no Vitest para o algoritmo de fusão RRF.
+  - [ ] Teste de fidelidade e relevância do contexto.

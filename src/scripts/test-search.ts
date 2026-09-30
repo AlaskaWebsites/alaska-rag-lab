@@ -1,35 +1,23 @@
 import { pool } from '../core/database/db.js';
 import { OllamaService } from '../modules/ai-engine/providers/ollama.service.js';
+import {
+  reciprocalRankFusion,
+  buildLexicalQuery,
+  type ScoredCandidate,
+} from '../modules/rag/domain/rrf.js';
 
-/**
- * Converte uma pergunta conversacional em termos de busca léxica com operador OR.
- * Ex: "Tem algum telefone pra contato?" -> "telefone or contato"
- * Isso evita a armadilha do operador AND estrito do plainto_tsquery quando a pergunta
- * possui palavras de preenchimento (ex: "tem", "algum", "pra").
- */
-function buildLexicalQuery(text: string): string {
-  const words = text
-    .replace(/[^\w\s\d]/gi, ' ')
-    .split(/\s+/)
-    .map((w) => w.trim())
-    .filter((w) => w.length >= 3);
-
-  if (words.length === 0) return text;
-  return words.join(' or ');
-}
-
-async function hybridSearch(queryText: string, topK: number = 3) {
+async function hybridSearchWithRRF(queryText: string, topK: number = 3) {
   const ollama = new OllamaService();
   const lexicalQuery = buildLexicalQuery(queryText);
 
   console.log(`\n${'='.repeat(80)}`);
-  console.log(`🔎 [MARCO 1: PROVA REAL DA BUSCA HÍBRIDA (DENSE + SPARSE)]`);
+  console.log(`🔬 [RAG NÍVEL 2: BUSCA HÍBRIDA + RECIPROCAL RANK FUSION (RRF)]`);
   console.log(`❓ Pergunta Original: "${queryText}"`);
   console.log(`🔤 Expressão Léxica:   "${lexicalQuery}"`);
   console.log(`${'='.repeat(80)}`);
 
-  // 1. Busca Vetorial (Dense Retrieval via nomic-embed-text e pgvector)
-  console.log('\n🧠 1. BUSCA VETORIAL (DENSE) — Foco em Conceitos e Semântica:');
+  // 1. Busca Vetorial (Dense Retrieval)
+  console.log('\n🧠 1. RANKING VETORIAL (DENSE) — Semântica:');
   const startVec = performance.now();
   const queryEmbedding = await ollama.generateEmbedding(queryText);
   const vecGenMs = (performance.now() - startVec).toFixed(2);
@@ -50,21 +38,27 @@ async function hybridSearch(queryText: string, topK: number = 3) {
   `;
   const vectorResult = await pool.query(vectorQuery, [
     JSON.stringify(queryEmbedding),
-    topK,
+    topK * 2,
   ]);
   const vecDbMs = (performance.now() - startDbVec).toFixed(2);
 
-  console.log(`   ⚡ Vetor gerado em ${vecGenMs}ms | Consulta pgvector HNSW em ${vecDbMs}ms`);
-  console.log('   ' + '-'.repeat(76));
-  vectorResult.rows.forEach((row, i) => {
+  console.log(`   ⚡ Vetor em ${vecGenMs}ms | Consulta pgvector em ${vecDbMs}ms`);
+  const vectorCandidates: ScoredCandidate[] = vectorResult.rows.map((row) => ({
+    id: row.id,
+    chunkIndex: row.chunk_index,
+    documentTitle: row.doc_title,
+    content: row.content,
+    vectorSimilarity: parseFloat(row.similaridade),
+  }));
+
+  vectorCandidates.slice(0, topK).forEach((c, i) => {
     console.log(
-      `   #${i + 1} | Chunk [${row.chunk_index}] | Similaridade: ${(row.similaridade * 100).toFixed(1)}% (Dist: ${row.distancia_cosseno})`
+      `   #${i + 1} | Chunk [${c.chunkIndex}] | Similaridade: ${(c.vectorSimilarity! * 100).toFixed(1)}%`
     );
-    console.log(`      "${row.content.trim().slice(0, 110)}..."`);
   });
 
-  // 2. Busca Léxica (Sparse Retrieval via PostgreSQL Full-Text Search com GIN e websearch_to_tsquery)
-  console.log('\n📖 2. BUSCA LÉXICA (SPARSE / FTS) — Foco em Palavras Exatas, Siglas e Números:');
+  // 2. Busca Léxica (Sparse / FTS)
+  console.log('\n📖 2. RANKING LÉXICO (SPARSE / FTS) — Palavras Exatas:');
   const startFts = performance.now();
   const ftsQuery = `
     SELECT 
@@ -85,38 +79,59 @@ async function hybridSearch(queryText: string, topK: number = 3) {
     ORDER BY text_score DESC
     LIMIT $2;
   `;
-  const ftsResult = await pool.query(ftsQuery, [lexicalQuery, topK]);
+  const ftsResult = await pool.query(ftsQuery, [lexicalQuery, topK * 2]);
   const ftsMs = (performance.now() - startFts).toFixed(2);
 
-  console.log(`   ⚡ Consulta FTS com índice GIN concluída em ${ftsMs}ms`);
-  console.log('   ' + '-'.repeat(76));
+  console.log(`   ⚡ FTS com índice GIN em ${ftsMs}ms`);
+  const textCandidates: ScoredCandidate[] = ftsResult.rows.map((row) => ({
+    id: row.id,
+    chunkIndex: row.chunk_index,
+    documentTitle: row.doc_title,
+    content: row.content,
+    textScore: parseFloat(row.text_score),
+  }));
 
-  if (ftsResult.rows.length === 0) {
-    console.log('   ⚠️ Nenhum match exato de palavras encontrado pelo Full-Text Search.');
-    console.log('      (Isso acontece quando nenhuma das palavras da query existe literalmente no texto).');
+  if (textCandidates.length === 0) {
+    console.log('   ⚠️ Nenhum match exato encontrado pelo Full-Text Search.');
   } else {
-    ftsResult.rows.forEach((row, i) => {
-      console.log(
-        `   #${i + 1} | Chunk [${row.chunk_index}] | FTS Score (ts_rank_cd): ${row.text_score}`
-      );
-      console.log(`      Termos Casados: ${row.snippet.trim().replace(/\n/g, ' ')}`);
+    textCandidates.slice(0, topK).forEach((c, i) => {
+      console.log(`   #${i + 1} | Chunk [${c.chunkIndex}] | Score FTS: ${c.textScore}`);
     });
   }
 
-  console.log(`\n${'='.repeat(80)}`);
-  console.log(`💡 INSIGHT ARQUITETURAL:`);
-  console.log(`- Vetor pega o CONCEITO mesmo sem palavras iguais.`);
-  console.log(`- Full-Text pega a PALAVRA EXATA (números, siglas, IDs) em sub-milissegundos.`);
-  console.log(`- No Marco 2, o algoritmo RRF vai unificar esses dois rankings em um só!`);
-  console.log(`${'='.repeat(80)}\n`);
+  // 3. O Pulo do Gato: Reciprocal Rank Fusion (RRF)
+  console.log('\n🏆 3. RANKING FINAL CONSOLIDADO VIA RECIPROCAL RANK FUSION (RRF):');
+  console.log('   Fórmula: RRF(d) = SUM(1 / (60 + rank(d)))');
+  console.log('   ' + '-'.repeat(76));
 
+  const fused = reciprocalRankFusion(
+    [
+      { origin: 'vector', items: vectorCandidates },
+      { origin: 'fulltext', items: textCandidates },
+    ],
+    60
+  );
+
+  fused.slice(0, topK).forEach((c, i) => {
+    console.log(`   Posição #${i + 1} | Chunk [${c.chunkIndex}] | RRF Score: ${c.rrfScore}`);
+    console.log(`      Origens de Match: [${c.matchOrigins.join(' + ').toUpperCase()}]`);
+    if (c.vectorSimilarity) {
+      console.log(`      Similaridade Vetorial: ${(c.vectorSimilarity * 100).toFixed(1)}%`);
+    }
+    if (c.textScore) {
+      console.log(`      Pontuação Léxica FTS: ${c.textScore}`);
+    }
+    console.log(`      Trecho: "${c.content.trim().slice(0, 100)}..."`);
+    console.log('   ' + '-'.repeat(76));
+  });
+
+  console.log(`${'='.repeat(80)}\n`);
   await pool.end();
 }
 
-const inputQuestion =
-  process.argv[2] ?? 'Tem algum telefone pra contato?';
+const inputQuestion = process.argv[2] ?? 'Tem algum telefone pra contato?';
 
-hybridSearch(inputQuestion).catch((err) => {
-  console.error('Erro na busca híbrida:', err);
+hybridSearchWithRRF(inputQuestion).catch((err) => {
+  console.error('Erro na busca híbrida com RRF:', err);
   process.exit(1);
 });
