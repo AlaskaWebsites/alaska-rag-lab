@@ -1,12 +1,31 @@
 import { pool } from '../core/database/db.js';
 import { OllamaService } from '../modules/ai-engine/providers/ollama.service.js';
 
+/**
+ * Converte uma pergunta conversacional em termos de busca léxica com operador OR.
+ * Ex: "Tem algum telefone pra contato?" -> "telefone or contato"
+ * Isso evita a armadilha do operador AND estrito do plainto_tsquery quando a pergunta
+ * possui palavras de preenchimento (ex: "tem", "algum", "pra").
+ */
+function buildLexicalQuery(text: string): string {
+  const words = text
+    .replace(/[^\w\s\d]/gi, ' ')
+    .split(/\s+/)
+    .map((w) => w.trim())
+    .filter((w) => w.length >= 3);
+
+  if (words.length === 0) return text;
+  return words.join(' or ');
+}
+
 async function hybridSearch(queryText: string, topK: number = 3) {
   const ollama = new OllamaService();
+  const lexicalQuery = buildLexicalQuery(queryText);
 
   console.log(`\n${'='.repeat(80)}`);
   console.log(`🔎 [MARCO 1: PROVA REAL DA BUSCA HÍBRIDA (DENSE + SPARSE)]`);
-  console.log(`❓ Pergunta: "${queryText}"`);
+  console.log(`❓ Pergunta Original: "${queryText}"`);
+  console.log(`🔤 Expressão Léxica:   "${lexicalQuery}"`);
   console.log(`${'='.repeat(80)}`);
 
   // 1. Busca Vetorial (Dense Retrieval via nomic-embed-text e pgvector)
@@ -44,7 +63,7 @@ async function hybridSearch(queryText: string, topK: number = 3) {
     console.log(`      "${row.content.trim().slice(0, 110)}..."`);
   });
 
-  // 2. Busca Léxica (Sparse Retrieval via PostgreSQL Full-Text Search com GIN)
+  // 2. Busca Léxica (Sparse Retrieval via PostgreSQL Full-Text Search com GIN e websearch_to_tsquery)
   console.log('\n📖 2. BUSCA LÉXICA (SPARSE / FTS) — Foco em Palavras Exatas, Siglas e Números:');
   const startFts = performance.now();
   const ftsQuery = `
@@ -53,20 +72,20 @@ async function hybridSearch(queryText: string, topK: number = 3) {
       c.chunk_index,
       d.title AS doc_title,
       c.content,
-      ROUND(ts_rank_cd(c.tsv, plainto_tsquery('portuguese', $1))::numeric, 4) AS text_rank,
+      ROUND(ts_rank_cd(c.tsv, websearch_to_tsquery('portuguese', $1))::numeric, 4) AS text_score,
       ts_headline(
         'portuguese', 
         c.content, 
-        plainto_tsquery('portuguese', $1), 
+        websearch_to_tsquery('portuguese', $1), 
         'StartSel=>>>, StopSel=<<<, MaxWords=25, MinWords=10'
       ) AS snippet
     FROM document_chunks c
     JOIN documents d ON d.id = c.document_id
-    WHERE c.tsv @@ plainto_tsquery('portuguese', $1)
-    ORDER BY text_rank DESC
+    WHERE c.tsv @@ websearch_to_tsquery('portuguese', $1)
+    ORDER BY text_score DESC
     LIMIT $2;
   `;
-  const ftsResult = await pool.query(ftsQuery, [queryText, topK]);
+  const ftsResult = await pool.query(ftsQuery, [lexicalQuery, topK]);
   const ftsMs = (performance.now() - startFts).toFixed(2);
 
   console.log(`   ⚡ Consulta FTS com índice GIN concluída em ${ftsMs}ms`);
@@ -74,11 +93,11 @@ async function hybridSearch(queryText: string, topK: number = 3) {
 
   if (ftsResult.rows.length === 0) {
     console.log('   ⚠️ Nenhum match exato de palavras encontrado pelo Full-Text Search.');
-    console.log('      (Isso é normal para perguntas conceituais ou sem sobreposição literal de termos).');
+    console.log('      (Isso acontece quando nenhuma das palavras da query existe literalmente no texto).');
   } else {
     ftsResult.rows.forEach((row, i) => {
       console.log(
-        `   #${i + 1} | Chunk [${row.chunk_index}] | FTS Score (ts_rank): ${row.text_rank}`
+        `   #${i + 1} | Chunk [${row.chunk_index}] | FTS Score (ts_rank_cd): ${row.text_score}`
       );
       console.log(`      Termos Casados: ${row.snippet.trim().replace(/\n/g, ' ')}`);
     });
