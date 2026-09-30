@@ -17,7 +17,7 @@ Validar e consolidar na prática os conceitos dos mapas mentais de Engenharia de
 - **Fila & Cache Semântico**: BullMQ + Redis (Cache de embeddings com similaridade de cosseno)
 - **LLM & Embeddings Locais**: Ollama (`nomic-embed-text` para 768 dimensões e `llama3` para inferência)
 - **Contratos & Validação**: Zod (Structured Outputs e Fail-Fast)
-- **Testes**: Vitest
+- **Testes & Evals**: Vitest e Suíte com Golden Dataset
 
 ---
 
@@ -26,7 +26,8 @@ Validar e consolidar na prática os conceitos dos mapas mentais de Engenharia de
 ```text
 alaska-rag-lab/
 ├── data/
-│   └── sample-knowledge.md               # Documento Markdown corporativo para testes
+│   ├── sample-knowledge.md               # Documento Markdown corporativo para testes
+│   └── golden-dataset.json               # Gabarito de testes para avaliação contínua (Evals)
 ├── docker/
 │   ├── init.sql                          # Extensão vector, FTS (GIN), tabelas e índice HNSW
 │   └── migrations/
@@ -58,8 +59,11 @@ alaska-rag-lab/
 │   │       ├── domain/                   # Regras puras de fusão e ranking
 │   │       │   ├── rrf.ts                # Algoritmo Reciprocal Rank Fusion (RRF)
 │   │       │   └── rrf.spec.ts           # Testes unitários do RRF (Vitest)
+│   │       ├── evals/                    # Suíte de avaliação do RAG (RAG Evals)
+│   │       │   ├── rag-eval.service.ts   # Motor de cálculo de métricas (Hit Rate / p95)
+│   │       │   └── rag-eval.spec.ts      # Testes automatizados no Vitest
 │   │       ├── controllers/
-│   │       │   └── rag.controller.ts     # Entrada HTTP (POST /rag/ask)
+│   │       │   └── rag.controller.ts     # Endpoints HTTP (POST /rag/ask, GET /rag/stats)
 │   │       ├── dtos/
 │   │       │   └── rag.dto.ts            # Contrato de entrada da request
 │   │       ├── schemas/
@@ -74,7 +78,8 @@ alaska-rag-lab/
 │   │   ├── ask.ts                        # Runner CLI para perguntas
 │   │   ├── ingest-file.ts                # Runner CLI para enfileirar documentos
 │   │   ├── run-worker.ts                 # Runner CLI para o worker BullMQ
-│   │   └── test-search.ts                # Runner CLI para teste de busca híbrida com RRF
+│   │   ├── test-search.ts                # Runner CLI para teste de busca híbrida com RRF
+│   │   └── run-evals.ts                  # Runner CLI para a suíte de avaliação contínua
 │   ├── app.module.ts                     # Módulo raiz NestJS
 │   └── main.ts                           # Bootstrap HTTP NestJS
 ├── docker-compose.yml                    # Orquestração do Postgres (pgvector) e Redis
@@ -109,7 +114,7 @@ docker compose exec postgres psql -U postgres -d alaska_rag_db -c "
 "
 ```
 
-### 4. Instalar Dependências e Executar Testes (Vitest)
+### 4. Instalar Dependências e Executar Testes Unitários
 ```bash
 npm install
 npm test
@@ -124,35 +129,21 @@ npm run worker
 npm run ingest
 ```
 
-### 6. Executar o Servidor HTTP NestJS
+### 6. Executar Avaliação Contínua do RAG (RAG Evals - Marco 4)
+Rode a suíte de avaliação com o Golden Dataset:
+```bash
+npm run eval
+```
+O sistema avaliará o Hit Rate @ Top-3, a fidelidade semântica e a acurácia do Fail-Fast com latência p95.
+
+### 7. Executar o Servidor HTTP NestJS
 Inicie o servidor com hot reload:
 ```bash
 npm run start:dev
 ```
-A API estará disponível em: `http://localhost:3000/rag/ask`.
-
----
-
-## ⚡ Como Testar o Cache Semântico no Redis (Marco 3)
-
-Faça uma primeira pergunta no Thunder Client / Postman:
-```json
-{
-  "question": "Tem algum telefone pra contato?",
-  "debug": true
-}
-```
-* **Resultado**: `24s` (Cold start da LLM). A resposta é salva no Redis com o vetor semântico.
-
-Agora, faça uma **pergunta diferente com a mesma intenção**:
-```json
-{
-  "question": "Qual o telefone de contato?",
-  "debug": true
-}
-```
-* **Resultado**: **`~45ms` (CACHE HIT!)**
-* O sistema reconhece a similaridade semântica no Redis, não bate no Postgres e não chama a LLM, entregando a resposta instantaneamente!
+A API estará disponível em:
+* `POST /rag/ask` — Consulta RAG Híbrida com Cache Semântico
+* `GET /rag/stats` — Métricas de observabilidade de banco e cache
 
 ---
 
@@ -190,8 +181,11 @@ Agora, faça uma **pergunta diferente com a mesma intenção**:
 - [x] **Marco 3: Cache Semântico no Redis**:
   - [x] Cliente compartilhado do Redis em `src/core/database/redis.ts`.
   - [x] `SemanticCacheService` com cálculo de similaridade de cosseno em memória.
-  - [x] Interceptar perguntas com similaridade >= 0.92 no `rag.service.ts` (Cache Hit instantâneo).
+  - [x] Interceptar perguntas com similaridade >= 0.92 no `rag.service.ts` (Cache Hit instantâneo em 2ms).
   - [x] Testes unitários com Vitest (`semantic-cache.service.spec.ts`).
-- [ ] **Marco 4: Observabilidade Expandida & RAG Evals**:
-  - [ ] Métricas detalhadas de Cache Hit/Miss na telemetria.
-  - [ ] Avaliação da tríade do RAG (Context Relevance, Faithfulness e Answer Relevance).
+- [x] **Marco 4: Observabilidade Expandida & RAG Evals**:
+  - [x] Gabarito de testes estruturado em `data/golden-dataset.json`.
+  - [x] Motor de avaliação contínua em `src/modules/rag/evals/rag-eval.service.ts`.
+  - [x] Testes automatizados no Vitest (`src/modules/rag/evals/rag-eval.spec.ts`).
+  - [x] Runner de linha de comando `npm run eval` gerando relatório de Hit Rate e p95.
+  - [x] Endpoint de observabilidade `GET /rag/stats` no NestJS.

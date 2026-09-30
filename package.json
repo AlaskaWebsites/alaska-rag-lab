@@ -11,6 +11,7 @@
     "ingest": "tsx src/scripts/ingest-file.ts",
     "search": "tsx src/scripts/test-search.ts",
     "ask": "tsx src/scripts/ask.ts",
+    "eval": "tsx src/scripts/run-evals.ts",
     "test": "vitest run",
     "test:watch": "vitest"
   },

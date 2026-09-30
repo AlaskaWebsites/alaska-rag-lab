@@ -1,0 +1,37 @@
+[
+  {
+    "id": "eval-1",
+    "question": "Como são tratados os preços e valores monetários no sistema?",
+    "expectedKeywords": ["centavos inteiros", "ponto flutuante"],
+    "expectedChunkIndex": 1,
+    "expectedStatus": "SUCCESS"
+  },
+  {
+    "id": "eval-2",
+    "question": "Quais são os 4 pilares do ecossistema Alaska Local?",
+    "expectedKeywords": ["Menu", "Shop", "Hub", "Pro"],
+    "expectedChunkIndex": 0,
+    "expectedStatus": "SUCCESS"
+  },
+  {
+    "id": "eval-3",
+    "question": "Qual é o telefone de contato?",
+    "expectedKeywords": ["11969124940"],
+    "expectedChunkIndex": 2,
+    "expectedStatus": "SUCCESS"
+  },
+  {
+    "id": "eval-4",
+    "question": "Como funciona o isolamento multi-tenant no banco de dados?",
+    "expectedKeywords": ["Row-Level Security"],
+    "expectedChunkIndex": 1,
+    "expectedStatus": "SUCCESS"
+  },
+  {
+    "id": "eval-5",
+    "question": "Qual é a receita secreta da torta de maçã com canela?",
+    "expectedKeywords": [],
+    "expectedChunkIndex": null,
+    "expectedStatus": "INSUFFICIENT_DATA"
+  }
+]
