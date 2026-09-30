@@ -6,14 +6,14 @@ Laboratório prático de arquitetura **RAG Bare Metal** e orquestração determi
 
 ## 🎯 Objetivo
 
-Validar e consolidar na prática os conceitos dos mapas mentais de Engenharia de IA e Agentes Autônomos (Aulas 1 e 2), rodando um ambiente 100% local com **NestJS**, **PostgreSQL + pgvector**, **Ollama** e **Zod**.
+Validar e consolidar na prática os conceitos dos mapas mentais de Engenharia de IA e Agentes Autônomos (Aulas 1, 2 e 3), rodando um ambiente 100% local com **NestJS**, **PostgreSQL + pgvector**, **Ollama** e **Zod**.
 
 ---
 
 ## 🛠️ Stack Tecnológica
 
 - **Runtime & Framework**: Node.js, TypeScript e NestJS
-- **Banco Vetorial**: PostgreSQL 16 com extensão `pgvector` e índice **HNSW**
+- **Banco Vetorial & Léxico**: PostgreSQL 16 com extensão `pgvector` (HNSW) e Full-Text Search (GIN)
 - **Fila & Processamento Assíncrono**: BullMQ + Redis
 - **LLM & Embeddings Locais**: Ollama (`nomic-embed-text` para 768 dimensões e `llama3` para inferência)
 - **Contratos & Validação**: Zod (Structured Outputs e Fail-Fast)
@@ -28,7 +28,9 @@ alaska-rag-lab/
 ├── data/
 │   └── sample-knowledge.md               # Documento Markdown corporativo para testes
 ├── docker/
-│   └── init.sql                          # Extensão vector, tabelas e índice HNSW
+│   ├── init.sql                          # Extensão vector, FTS (GIN), tabelas e índice HNSW
+│   └── migrations/
+│       └── 001_add_full_text_search.sql  # Migration para FTS (Marco 1)
 ├── src/
 │   ├── core/                             # Camada transversal (Kernel do sistema)
 │   │   ├── common/
@@ -66,7 +68,7 @@ alaska-rag-lab/
 │   │   ├── ask.ts                        # Runner CLI para perguntas
 │   │   ├── ingest-file.ts                # Runner CLI para enfileirar documentos
 │   │   ├── run-worker.ts                 # Runner CLI para o worker BullMQ
-│   │   └── test-search.ts                # Runner CLI para teste de busca por cosseno (<=>)
+│   │   └── test-search.ts                # Runner CLI para teste de busca híbrida (Dense + Sparse)
 │   ├── app.module.ts                     # Módulo raiz NestJS
 │   └── main.ts                           # Bootstrap HTTP NestJS
 ├── docker-compose.yml                    # Orquestração do Postgres (pgvector) e Redis
@@ -79,7 +81,6 @@ alaska-rag-lab/
 ## 🚀 Como Executar Localmente
 
 ### 1. Pré-requisitos (Ollama)
-Certifique-se de ter o Ollama instalado com os modelos:
 ```bash
 ollama pull nomic-embed-text
 ollama pull llama3
@@ -92,14 +93,23 @@ docker compose up -d
 docker compose ps
 ```
 
-### 3. Instalar Dependências e Executar Testes
+### 3. Aplicar Migration do Full-Text Search (Marco 1)
+```bash
+docker compose exec postgres psql -U postgres -d alaska_rag_db -c "
+  ALTER TABLE document_chunks 
+  ADD COLUMN IF NOT EXISTS tsv tsvector 
+  GENERATED ALWAYS AS (to_tsvector('portuguese', content)) STORED;
+  CREATE INDEX IF NOT EXISTS idx_document_chunks_tsv ON document_chunks USING gin (tsv);
+"
+```
+
+### 4. Instalar Dependências e Executar Testes
 ```bash
 npm install
 npm test
 ```
 
-### 4. Ingestão Assíncrona de Documentos (Passo 1)
-Em dois terminais separados:
+### 5. Ingestão Assíncrona de Documentos (Passo 1)
 ```bash
 # Terminal 1: Inicia o worker BullMQ
 npm run worker
@@ -108,33 +118,20 @@ npm run worker
 npm run ingest
 ```
 
-### 5. Executar o Servidor HTTP NestJS
-Inicie o servidor com hot reload:
+### 6. Testar Busca Híbrida no PostgreSQL (Passo 4 - Marco 1)
+```bash
+# Teste com termo exato (telefone/sigla):
+npm run search -- "Tem algum telefone pra contato?"
+
+# Teste com pergunta conceitual:
+npm run search -- "Como são tratados os preços e valores monetários no sistema?"
+```
+
+### 7. Executar o Servidor HTTP NestJS
 ```bash
 npm run start:dev
 ```
 A API estará disponível em: `http://localhost:3000/rag/ask`.
-
----
-
-## 📡 Como Chamar o Endpoint HTTP
-
-### Exemplo 1: Pergunta respondível com telemetria (Visão Biônica)
-```bash
-curl -X POST http://localhost:3000/rag/ask \
-  -H "Content-Type: application/json" \
-  -d '{
-    "question": "Como são tratados os preços e valores monetários no sistema?",
-    "debug": true
-  }'
-```
-
-### Exemplo 2: Pergunta fora do escopo (Fail-Fast / Insufficient Data)
-```bash
-curl -X POST http://localhost:3000/rag/ask \
-  -H "Content-Type: application/json" \
-  -d '{"question": "Qual a receita secreta da torta de maçã?"}'
-```
 
 ---
 
@@ -159,3 +156,18 @@ curl -X POST http://localhost:3000/rag/ask \
 - [x] Definir schema Zod estrito (`RagResponseSchema`) para validar a saída em tempo de execução.
 - [x] Implementar barreira *fail-fast*: se a resposta for incompleta, inválida ou faltar contexto, retornar deterministicamente a flag `INSUFFICIENT_DATA`, bloqueando alucinações.
 - [x] Adicionar telemetria biônica com medição de latência ponta a ponta e flag `debug: true`.
+
+### Passo 4: RAG Nível 2 (Refinamento & Recuperação Avançada)
+- [x] **Marco 1: Busca Híbrida no PostgreSQL (Dense + Sparse)**:
+  - [x] Coluna gerada `tsv tsvector` com dicionário em português na tabela `document_chunks`.
+  - [x] Índice GIN (`idx_document_chunks_tsv`) para busca de texto completo em sub-milissegundos.
+  - [x] Script `test-search.ts` atualizado para comparar busca vetorial (HNSW) vs. léxica (GIN) lado a lado.
+- [ ] **Marco 2: Algoritmo de Fusão RRF (Reciprocal Rank Fusion)**:
+  - [ ] Implementar função pura de RRF combinando os scores vetorial e léxico.
+  - [ ] Integrar RRF no `rag.service.ts` para ranking único consolidado.
+- [ ] **Marco 3: Cache Semântico no Redis**:
+  - [ ] Armazenar pares de perguntas e respostas no Redis com similaridade de embedding >= 0.95.
+  - [ ] Retornar respostas instantâneas (<10ms) em caso de Cache Hit.
+- [ ] **Marco 4: Observabilidade Expandida & RAG Evals**:
+  - [ ] Métricas detalhadas de Cache Hit/Miss e scores RRF na telemetria.
+  - [ ] Testes automatizados no Vitest para o algoritmo de fusão RRF.
