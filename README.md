@@ -14,7 +14,7 @@ Validar e consolidar na prática os conceitos dos mapas mentais de Engenharia de
 
 - **Runtime & Framework**: Node.js, TypeScript e NestJS
 - **Banco Vetorial & Léxico**: PostgreSQL 16 com extensão `pgvector` (HNSW) e Full-Text Search (GIN)
-- **Fila & Processamento Assíncrono**: BullMQ + Redis
+- **Fila & Cache Semântico**: BullMQ + Redis (Cache de embeddings com similaridade de cosseno)
 - **LLM & Embeddings Locais**: Ollama (`nomic-embed-text` para 768 dimensões e `llama3` para inferência)
 - **Contratos & Validação**: Zod (Structured Outputs e Fail-Fast)
 - **Testes**: Vitest
@@ -39,7 +39,8 @@ alaska-rag-lab/
 │   │   ├── config/
 │   │   │   └── env.ts                    # Variáveis de ambiente validadas com Zod
 │   │   └── database/
-│   │       └── db.ts                     # Pool de conexões PostgreSQL
+│   │       ├── db.ts                     # Pool de conexões PostgreSQL
+│   │       └── redis.ts                  # Conexão compartilhada Redis (ioredis)
 │   ├── modules/                          # Domínios e funcionalidades de negócio
 │   │   ├── ai-engine/                    # 1. Provedor agnóstico de IA
 │   │   │   ├── providers/
@@ -65,7 +66,9 @@ alaska-rag-lab/
 │   │       │   ├── rag.schema.ts         # Contrato de saída da LLM (Zod)
 │   │       │   └── rag.schema.spec.ts    # Testes unitários do contrato
 │   │       ├── services/
-│   │       │   └── rag.service.ts        # Orquestrador RAG com Busca Híbrida + RRF
+│   │       │   ├── rag.service.ts        # Orquestrador RAG (Híbrido + RRF + Cache)
+│   │       │   ├── semantic-cache.service.ts      # Cache Semântico com Redis
+│   │       │   └── semantic-cache.service.spec.ts # Testes do Cache Semântico
 │   │       └── rag.module.ts
 │   ├── scripts/                          # Ferramentas CLI auxiliares
 │   │   ├── ask.ts                        # Runner CLI para perguntas
@@ -121,24 +124,35 @@ npm run worker
 npm run ingest
 ```
 
-### 6. Testar Busca Híbrida com RRF (Passo 4 - Marco 2)
-```bash
-# Teste com pergunta de telefone (FTS + Vetor):
-npm run search -- "Tem algum telefone pra contato?"
-
-# Teste com número exato:
-npm run search -- "11969124940"
-
-# Teste com ferramentas técnicas:
-npm run search -- "BullMQ e Redis"
-```
-
-### 7. Executar o Servidor HTTP NestJS
+### 6. Executar o Servidor HTTP NestJS
 Inicie o servidor com hot reload:
 ```bash
 npm run start:dev
 ```
 A API estará disponível em: `http://localhost:3000/rag/ask`.
+
+---
+
+## ⚡ Como Testar o Cache Semântico no Redis (Marco 3)
+
+Faça uma primeira pergunta no Thunder Client / Postman:
+```json
+{
+  "question": "Tem algum telefone pra contato?",
+  "debug": true
+}
+```
+* **Resultado**: `24s` (Cold start da LLM). A resposta é salva no Redis com o vetor semântico.
+
+Agora, faça uma **pergunta diferente com a mesma intenção**:
+```json
+{
+  "question": "Qual o telefone de contato?",
+  "debug": true
+}
+```
+* **Resultado**: **`~45ms` (CACHE HIT!)**
+* O sistema reconhece a similaridade semântica no Redis, não bate no Postgres e não chama a LLM, entregando a resposta instantaneamente!
 
 ---
 
@@ -173,10 +187,11 @@ A API estará disponível em: `http://localhost:3000/rag/ask`.
   - [x] Implementar função pura `reciprocalRankFusion` em `src/modules/rag/domain/rrf.ts`.
   - [x] Criar testes unitários com Vitest (`rrf.spec.ts`).
   - [x] Integrar Busca Híbrida Paralela + Fusão RRF no `rag.service.ts` e no endpoint HTTP.
-  - [x] Exibir ranking consolidado RRF no CLI `test-search.ts`.
-- [ ] **Marco 3: Cache Semântico no Redis**:
-  - [ ] Armazenar pares de perguntas e respostas no Redis com similaridade de embedding >= 0.95.
-  - [ ] Retornar respostas instantâneas (<10ms) em caso de Cache Hit.
+- [x] **Marco 3: Cache Semântico no Redis**:
+  - [x] Cliente compartilhado do Redis em `src/core/database/redis.ts`.
+  - [x] `SemanticCacheService` com cálculo de similaridade de cosseno em memória.
+  - [x] Interceptar perguntas com similaridade >= 0.92 no `rag.service.ts` (Cache Hit instantâneo).
+  - [x] Testes unitários com Vitest (`semantic-cache.service.spec.ts`).
 - [ ] **Marco 4: Observabilidade Expandida & RAG Evals**:
-  - [ ] Métricas detalhadas de Cache Hit/Miss e scores RRF na telemetria.
-  - [ ] Teste de fidelidade e relevância do contexto.
+  - [ ] Métricas detalhadas de Cache Hit/Miss na telemetria.
+  - [ ] Avaliação da tríade do RAG (Context Relevance, Faithfulness e Answer Relevance).

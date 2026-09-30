@@ -8,6 +8,7 @@ import {
   type ScoredCandidate,
   type FusedCandidate,
 } from '../domain/rrf.js';
+import { SemanticCacheService } from './semantic-cache.service.js';
 
 export interface RagQueryOptions {
   topK?: number;
@@ -18,9 +19,14 @@ export interface RagQueryOptions {
 @Injectable()
 export class RagService {
   private readonly ollama: OllamaService;
+  private readonly semanticCache: SemanticCacheService;
 
-  constructor(@Optional() @Inject(OllamaService) ollamaService?: OllamaService) {
+  constructor(
+    @Optional() @Inject(OllamaService) ollamaService?: OllamaService,
+    @Optional() @Inject(SemanticCacheService) semanticCacheService?: SemanticCacheService
+  ) {
     this.ollama = ollamaService ?? new OllamaService();
+    this.semanticCache = semanticCacheService ?? new SemanticCacheService();
   }
 
   async ask(question: string, options: RagQueryOptions = {}): Promise<RagResponse> {
@@ -30,7 +36,7 @@ export class RagService {
     const lexicalQuery = buildLexicalQuery(question);
 
     console.log(`\n${'='.repeat(75)}`);
-    console.log(`🔬 [RAG NÍVEL 2 - BUSCA HÍBRIDA + RRF ATIVADA]`);
+    console.log(`🔬 [RAG NÍVEL 2 - PIPELINE HÍBRIDO + CACHE SEMÂNTICO]`);
     console.log(`❓ Pergunta: "${question}"`);
 
     // 1. Vetorização em tempo real da pergunta (Ollama nomic-embed-text)
@@ -39,7 +45,46 @@ export class RagService {
     const vectorizationMs = Math.round(performance.now() - startVec);
     console.log(`⚡ [1. Vetorização]: ${vectorizationMs}ms (Vetor de 768 dimensões gerado)`);
 
-    // 2. Busca Híbrida Paralela no PostgreSQL (Dense com HNSW + Sparse com GIN)
+    // 2. Verificação no Cache Semântico (Redis)
+    const startCache = performance.now();
+    const cacheHit = await this.semanticCache.findSimilar(queryEmbedding, 0.92);
+    const cacheCheckMs = Math.round(performance.now() - startCache);
+
+    if (cacheHit) {
+      const totalMs = Math.round(performance.now() - totalStart);
+      console.log(
+        `⚡ [2. Cache Semântico HIT!]: ${cacheCheckMs}ms | ${(cacheHit.similarity * 100).toFixed(1)}% similar à pergunta: "${cacheHit.cachedQuestion}"`
+      );
+      console.log(`🚀 [Economia]: ZERO queries no Postgres e ZERO tokens no Ollama!`);
+      console.log(`⏱️ [TEMPO TOTAL]: ${totalMs}ms (${(totalMs / 1000).toFixed(2)}s)`);
+      console.log(`${'='.repeat(75)}\n`);
+
+      const cachedResponse: RagResponse = {
+        ...cacheHit.response,
+        ...(isDebug && {
+          debug: {
+            latencies: {
+              vectorizationMs,
+              vectorSearchMs: 0,
+              llmGenerationMs: 0,
+              validationMs: 0,
+              totalMs,
+            },
+            candidatesFound: cacheHit.response.sources.length,
+            promptTokensEstimated: 0,
+            cacheHit: true,
+            cachedQuestion: cacheHit.cachedQuestion,
+            cacheSimilarity: cacheHit.similarity,
+          },
+        }),
+      };
+
+      return cachedResponse;
+    }
+
+    console.log(`🔍 [2. Cache Semântico MISS]: ${cacheCheckMs}ms | Nenhuma pergunta similar em cache.`);
+
+    // 3. Busca Híbrida Paralela no PostgreSQL (Dense com HNSW + Sparse com GIN)
     const startDb = performance.now();
 
     const vectorQuery = `
@@ -76,10 +121,10 @@ export class RagService {
 
     const vectorSearchMs = Math.round(performance.now() - startDb);
     console.log(
-      `📊 [2. Busca Híbrida]: ${vectorSearchMs}ms (Dense: ${vecResult.rows.length} chunks | Sparse FTS: ${ftsResult.rows.length} chunks)`
+      `📊 [3. Busca Híbrida]: ${vectorSearchMs}ms (Dense: ${vecResult.rows.length} chunks | Sparse FTS: ${ftsResult.rows.length} chunks)`
     );
 
-    // 3. Fusão com Reciprocal Rank Fusion (RRF)
+    // 4. Fusão com Reciprocal Rank Fusion (RRF)
     const vectorCandidates: ScoredCandidate[] = vecResult.rows.map((row) => ({
       id: row.id,
       chunkIndex: row.chunk_index,
@@ -104,7 +149,7 @@ export class RagService {
       60
     );
 
-    console.log(`🔀 [3. Fusão RRF]: ${fusedCandidates.length} candidatos únicos combinados`);
+    console.log(`🔀 [4. Fusão RRF]: ${fusedCandidates.length} candidatos únicos combinados`);
     fusedCandidates.slice(0, topK).forEach((c, idx) => {
       console.log(
         `   └─ #${idx + 1} | Chunk [${c.chunkIndex}] | RRF: ${c.rrfScore} | Origens: [${c.matchOrigins.join(', ')}]`
@@ -113,7 +158,7 @@ export class RagService {
 
     const approvedChunks = fusedCandidates.slice(0, topK);
 
-    // 4. Verificação Fail-Fast Pré-LLM
+    // 5. Verificação Fail-Fast Pré-LLM
     if (approvedChunks.length === 0) {
       const totalMs = Math.round(performance.now() - totalStart);
       console.log(`🛑 [Fail-Fast]: Nenhum chunk recuperado. Abortando chamada da LLM.`);
@@ -127,7 +172,7 @@ export class RagService {
       };
     }
 
-    // 5. Montagem Cirúrgica do Prompt
+    // 6. Montagem Cirúrgica do Prompt
     const contextFormatted = approvedChunks
       .map(
         (c, idx) =>
@@ -160,8 +205,8 @@ REGRAS RÍGIDAS DE GERAÇÃO:
 
     const userPrompt = `Contexto Disponível:\n${contextFormatted}\n\nPergunta do Usuário:\n${question}`;
 
-    // 6. Chamada à LLM (Ollama llama3)
-    console.log(`🤖 [4. Inferência LLM]: Disparando prompt para o Ollama (llama3)...`);
+    // 7. Chamada à LLM (Ollama llama3)
+    console.log(`🤖 [5. Inferência LLM]: Disparando prompt para o Ollama (llama3)...`);
     const startLlm = performance.now();
     const rawOutput = await this.ollama.generateChatCompletion([
       { role: 'system', content: systemPrompt },
@@ -170,7 +215,7 @@ REGRAS RÍGIDAS DE GERAÇÃO:
     const llmGenerationMs = Math.round(performance.now() - startLlm);
     console.log(`   └─ LLM respondeu em ${llmGenerationMs}ms (${(llmGenerationMs / 1000).toFixed(2)}s)`);
 
-    // 7. Validação Fail-Fast com Zod
+    // 8. Validação Fail-Fast com Zod
     const startVal = performance.now();
     let validatedResponse: RagResponse;
 
@@ -178,8 +223,12 @@ REGRAS RÍGIDAS DE GERAÇÃO:
       const parsedJson = JSON.parse(rawOutput);
       const validated = RagResponseSchema.parse(parsedJson);
       const validationMs = Math.round(performance.now() - startVal);
-      console.log(`🛡️ [5. Zod Validation]: ${validationMs}ms (Status: ${validated.status})`);
+      console.log(`🛡️ [6. Zod Validation]: ${validationMs}ms (Status: ${validated.status})`);
       validatedResponse = validated;
+
+      // Salva no Cache Semântico do Redis para responder instantaneamente no futuro
+      await this.semanticCache.save(question, queryEmbedding, validatedResponse);
+      console.log(`💾 [Cache Semântico]: Pergunta e resposta salvas no Redis (TTL: 1h).`);
     } catch (validationError) {
       console.warn(`⚠️ [Zod Fail-Fast]: LLM gerou payload inválido. Ativando fallback.`);
       validatedResponse = {
@@ -209,6 +258,7 @@ REGRAS RÍGIDAS DE GERAÇÃO:
         },
         candidatesFound: approvedChunks.length,
         promptTokensEstimated,
+        cacheHit: false,
       };
     }
 

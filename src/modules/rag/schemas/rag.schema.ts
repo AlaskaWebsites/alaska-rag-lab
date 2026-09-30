@@ -28,6 +28,9 @@ export const RagResponseSchema = z.object({
       }),
       candidatesFound: z.number(),
       promptTokensEstimated: z.number(),
+      cacheHit: z.boolean().optional(),
+      cachedQuestion: z.string().optional(),
+      cacheSimilarity: z.number().optional(),
     })
     .optional(),
 });
